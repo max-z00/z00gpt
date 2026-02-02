@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+import httpx
 import pandas as pd
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -23,8 +23,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"]
-    ,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -129,7 +128,7 @@ async def get_dataset_preview(dataset_id: str) -> dict[str, Any]:
     dataset = db.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    df = read_dataset(dataset.path, max_rows=200)
+    df = read_dataset(dataset.path, max_rows=50)
     return preview_dataframe(df)
 
 
@@ -147,6 +146,17 @@ async def list_runs(project_id: str) -> list[dict[str, Any]]:
         }
         for run in runs
     ]
+
+
+@app.get("/llm/test")
+async def test_llm() -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get("http://localhost:11434/api/tags")
+            response.raise_for_status()
+        return {"status": "ok"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
 
 
 @app.get("/runs/{run_id}/export")

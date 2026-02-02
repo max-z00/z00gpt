@@ -14,7 +14,9 @@ ollama pull llama3.1:8b
 ```bash
 cd services/api
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # macOS/Linux
+# On Windows PowerShell:
+# .\\.venv\\Scripts\\Activate.ps1
 pip install -e .
 uvicorn app.main:app --reload
 ```

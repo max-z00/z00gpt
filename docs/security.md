@@ -15,4 +15,4 @@
 
 - Dataset previews are capped at 50 rows.
 - Queries return a preview capped at 200 rows.
-- Profiling uses sample-based summaries for large files.
+- Profiling runs on the uploaded dataset and should be constrained to reasonable file sizes.

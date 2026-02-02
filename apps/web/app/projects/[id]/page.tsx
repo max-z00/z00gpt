@@ -75,13 +75,14 @@ export default function ProjectPage() {
     setMessages((prev) => [...prev, newMessage]);
     setInput("");
     setStatus("Thinking...");
+    const history = [...messages, newMessage];
     const response = await fetch(`${API_BASE}/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         project_id: projectId,
         dataset_id: selectedDataset?.id ?? null,
-        messages: [...messages, newMessage],
+        messages: history,
         settings: { provider: "ollama", model: "llama3.1:8b", temperature: 0.2 },
       }),
     });
@@ -93,6 +94,7 @@ export default function ProjectPage() {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let currentEvent = "";
     let assistantMessage: ChatMessage = { role: "assistant", content: "" };
 
     while (true) {
@@ -102,37 +104,48 @@ export default function ProjectPage() {
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.startsWith("data:")) {
-          const data = JSON.parse(line.replace("data:", "").trim());
-          if (data.token) {
-            assistantMessage = {
-              ...assistantMessage,
-              content: assistantMessage.content + data.token,
-            };
-            setMessages((prev) => [...prev.slice(0, -1), assistantMessage]);
-            if (messages.length === 0 || messages[messages.length - 1].role !== "assistant") {
-              setMessages((prev) => [...prev, assistantMessage]);
+        if (line.startsWith("event:")) {
+          currentEvent = line.replace("event:", "").trim();
+          continue;
+        }
+        if (!line.startsWith("data:")) continue;
+        const data = JSON.parse(line.replace("data:", "").trim());
+        if (currentEvent === "token" && data.token) {
+          assistantMessage = {
+            ...assistantMessage,
+            content: assistantMessage.content + data.token,
+          };
+          setMessages((prev) => {
+            const next = [...prev];
+            if (next.length === 0 || next[next.length - 1].role !== "assistant") {
+              next.push(assistantMessage);
+            } else {
+              next[next.length - 1] = assistantMessage;
             }
-          }
-          if (data.message) {
-            assistantMessage = {
-              role: "assistant",
-              content: data.message,
-              table: data.table,
-              chart: data.chart,
-            };
-            setMessages((prev) => [...prev, assistantMessage]);
-            setStatus(null);
-            void load();
-          }
+            return next;
+          });
+        }
+        if (currentEvent === "final" && data.message) {
+          assistantMessage = {
+            role: "assistant",
+            content: data.message,
+            table: data.table,
+            chart: data.chart,
+          };
+          setMessages((prev) => [...prev, assistantMessage]);
+          setStatus(null);
+          void load();
         }
       }
     }
   };
 
   const chartData = useMemo(() => {
-    const latest = messages.findLast((message) => message.chart)?.chart;
-    return latest?.data ?? [];
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const candidate = messages[i].chart;
+      if (candidate?.data) return candidate.data;
+    }
+    return [];
   }, [messages]);
 
   return (

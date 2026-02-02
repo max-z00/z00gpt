@@ -18,7 +18,9 @@ ollama pull llama3.1:8b
 # Backend
 cd services/api
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # macOS/Linux
+# On Windows PowerShell:
+# .\\.venv\\Scripts\\Activate.ps1
 pip install -e .
 
 # Frontend
@@ -31,7 +33,9 @@ npm install
 ```bash
 # Terminal 1: backend
 cd services/api
-source .venv/bin/activate
+source .venv/bin/activate  # macOS/Linux
+# On Windows PowerShell:
+# .\\.venv\\Scripts\\Activate.ps1
 uvicorn app.main:app --reload
 
 # Terminal 2: frontend

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { API_BASE } from "../lib/api";
 
 export default function SettingsPage() {
   const [provider, setProvider] = useState("ollama");
@@ -11,9 +12,12 @@ export default function SettingsPage() {
   const testConnection = async () => {
     setStatus("Testing connection...");
     try {
-      const response = await fetch("http://localhost:11434/api/tags");
-      if (!response.ok) throw new Error("Ollama not reachable");
-      setStatus("Connection successful.");
+      const response = await fetch(`${API_BASE}/llm/test`, { cache: "no-store" });
+      const data = await response.json();
+      if (data.status !== "ok") {
+        throw new Error(data.detail ?? "LLM not reachable");
+      }
+      setStatus("Connection successful via backend.");
     } catch (err) {
       setStatus((err as Error).message);
     }
