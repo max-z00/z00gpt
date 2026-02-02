@@ -50,6 +50,26 @@ export async function uploadDataset(projectId: string, file: File): Promise<Data
   return res.json();
 }
 
+export type UrlImportPayload = {
+  url: string;
+  filename?: string;
+  kaggle_username?: string;
+  kaggle_key?: string;
+};
+
+export async function importDatasetFromUrl(
+  projectId: string,
+  payload: UrlImportPayload,
+): Promise<Dataset> {
+  const res = await fetch(`${API_BASE}/projects/${projectId}/datasets/import-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to import dataset from URL");
+  return res.json();
+}
+
 export async function fetchRuns(projectId: string) {
   const res = await fetch(`${API_BASE}/projects/${projectId}/runs`, {
     cache: "no-store",

@@ -6,25 +6,29 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+import httpx
 import pandas as pd
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from . import db
+from .importers import import_dataset_from_kaggle, import_dataset_from_url, parse_kaggle_url
 from .llm import DEVELOPER_PROMPT, FEW_SHOTS, SYSTEM_PROMPT, stream_ollama
 from .profiling import preview_dataframe, profile_dataframe, read_dataset
 from .tools import QueryError, build_chart_spec, run_sql, summarize_dataframe, tool_result_payload
 
 app = FastAPI(title="LLM Data Analytics API", version="0.1.0")
 
+MAX_PROFILE_ROWS = 200_000
+LARGE_FILE_THRESHOLD_MB = 100
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"]
-    ,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -101,9 +105,12 @@ async def upload_dataset(project_id: str, file: UploadFile = File(...)) -> dict[
     project = db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    content = await file.read()
-    path = db.write_uploaded_file(project_id, file.filename, content)
-    df = read_dataset(str(path))
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="File name is required")
+    path = db.stream_upload_to_path(project_id, file.filename, file.file)
+    size_mb = Path(path).stat().st_size / (1024 * 1024)
+    max_rows = MAX_PROFILE_ROWS if size_mb >= LARGE_FILE_THRESHOLD_MB else None
+    df = read_dataset(str(path), max_rows=max_rows)
     profile = profile_dataframe(df)
     dataset_id = str(uuid.uuid4())
     dataset = db.create_dataset(dataset_id, project_id, file.filename, str(path), profile)
@@ -114,6 +121,13 @@ async def upload_dataset(project_id: str, file: UploadFile = File(...)) -> dict[
         "created_at": dataset.created_at,
         "profile": profile,
     }
+
+
+class UrlImportRequest(BaseModel):
+    url: str
+    filename: str | None = None
+    kaggle_username: str | None = None
+    kaggle_key: str | None = None
 
 
 @app.get("/datasets/{dataset_id}/profile")
@@ -129,8 +143,46 @@ async def get_dataset_preview(dataset_id: str) -> dict[str, Any]:
     dataset = db.get_dataset(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    df = read_dataset(dataset.path, max_rows=200)
+    df = read_dataset(dataset.path, max_rows=50)
     return preview_dataframe(df)
+
+
+@app.post("/projects/{project_id}/datasets/import-url")
+async def import_dataset_url(project_id: str, payload: UrlImportRequest) -> dict[str, Any]:
+    project = db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        if "kaggle.com" in payload.url:
+            kaggle_ref = parse_kaggle_url(payload.url)
+            if not kaggle_ref:
+                raise HTTPException(status_code=400, detail="Invalid Kaggle dataset URL")
+            file_path = import_dataset_from_kaggle(
+                project_id,
+                kaggle_ref,
+                payload.filename,
+                payload.kaggle_username,
+                payload.kaggle_key,
+            )
+        else:
+            file_path = await import_dataset_from_url(project_id, payload.url, payload.filename)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    size_mb = Path(file_path).stat().st_size / (1024 * 1024)
+    max_rows = MAX_PROFILE_ROWS if size_mb >= LARGE_FILE_THRESHOLD_MB else None
+    df = read_dataset(str(file_path), max_rows=max_rows)
+    profile = profile_dataframe(df)
+    dataset_id = str(uuid.uuid4())
+    dataset = db.create_dataset(
+        dataset_id, project_id, file_path.name, str(file_path), profile
+    )
+    return {
+        "id": dataset.id,
+        "project_id": dataset.project_id,
+        "filename": dataset.filename,
+        "created_at": dataset.created_at,
+        "profile": profile,
+    }
 
 
 @app.get("/projects/{project_id}/runs")
@@ -147,6 +199,17 @@ async def list_runs(project_id: str) -> list[dict[str, Any]]:
         }
         for run in runs
     ]
+
+
+@app.get("/llm/test")
+async def test_llm() -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get("http://localhost:11434/api/tags")
+            response.raise_for_status()
+        return {"status": "ok"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
 
 
 @app.get("/runs/{run_id}/export")

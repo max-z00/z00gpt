@@ -223,11 +223,25 @@ def ensure_project_dir(project_id: str) -> Path:
     return project_dir
 
 
-def write_uploaded_file(project_id: str, filename: str, content: bytes) -> Path:
+def write_uploaded_file(project_id: str, filename: str, content: bytes | None = None) -> Path:
     project_dir = ensure_project_dir(project_id)
     safe_name = os.path.basename(filename)
     path = project_dir / safe_name
-    path.write_bytes(content)
+    if content is not None:
+        path.write_bytes(content)
+    return path
+
+
+def stream_upload_to_path(project_id: str, filename: str, file_obj: Any) -> Path:
+    project_dir = ensure_project_dir(project_id)
+    safe_name = os.path.basename(filename)
+    path = project_dir / safe_name
+    with open(path, "wb") as handle:
+        while True:
+            chunk = file_obj.read(1024 * 1024)
+            if not chunk:
+                break
+            handle.write(chunk)
     return path
 
 

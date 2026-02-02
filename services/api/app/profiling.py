@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".json", ".parquet"}
 
@@ -13,11 +14,14 @@ def read_dataset(path: str, max_rows: int | None = None) -> pd.DataFrame:
     if ext == ".csv":
         return pd.read_csv(path, nrows=max_rows)
     if ext == ".xlsx":
-        return pd.read_excel(path)
+        return pd.read_excel(path, nrows=max_rows)
     if ext == ".json":
         return pd.read_json(path)
     if ext == ".parquet":
-        return pd.read_parquet(path)
+        table = pq.read_table(path)
+        if max_rows is not None and table.num_rows > max_rows:
+            table = table.slice(0, max_rows)
+        return table.to_pandas()
     raise ValueError(f"Unsupported file type: {ext}")
 
 
